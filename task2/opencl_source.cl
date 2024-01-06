@@ -20,16 +20,14 @@ kernel void reduce(global float *a, global float *result) {
     result[groupId] = buff[0];
   }
 
-  int globalId = get_global_id(0);
-  int globalSize = get_global_id(0);
+  const int globalSize = get_global_size(0);
+  const int globalId = get_global_id(0);
 
   if (globalId == 0 && globalSize / localSize <= localSize) {
     float sum = 0;
-    int numGroups = get_num_groups(0);
-
-    for (int i = 0; i < numGroups; i++) {
-      sum += result[i];
-    }
+    const int numGroups = get_num_groups(0);
+    for (int j = 0; j < numGroups; j++)
+      sum += result[j];
     result[0] = sum;
   }
 }
