@@ -107,7 +107,7 @@ void profile_reduce(int n, OpenCL &opencl)
     Vector<float> result(localSize);
 
     int resultSize = n / localSize;
-    while(true)
+    while (true)
     {
         kernel.setArg(0, vectorBuffer);
         cl::Buffer resultBuffer(opencl.context, CL_MEM_READ_WRITE, sizeof(float) * resultSize);
@@ -131,7 +131,6 @@ void profile_reduce(int n, OpenCL &opencl)
         }
 
         resultSize /= localSize;
-
     }
 
     assertCloseTo(expected_result, result[0]);
@@ -141,19 +140,48 @@ void profile_reduce(int n, OpenCL &opencl)
           {bandwidth(n * n + n + n, t0, t1), bandwidth(n * n + n + n, t2, t3)});
 }
 
-void profile_scan_inclusive(int n)
+void profile_scan_inclusive(int n, OpenCL &opencl)
 {
+    int localSize = 256;
     auto a = random_vector<float>(n);
     Vector<float> result(a), expected_result(a);
+    opencl.queue.flush();
+    cl::Kernel kernelForScan(opencl.program, "scan_inclusive");
+    cl::Kernel kernelForFinalization(opencl.program, "scan_inclusive_end");
+
     auto t0 = clock_type::now();
     scan_inclusive(expected_result);
+
     auto t1 = clock_type::now();
+    cl::Buffer vectorBuffer(opencl.queue, begin(a), end(a), false);
+    opencl.queue.finish();
+
     auto t2 = clock_type::now();
+    int size = n;
+    int step = 1;
+    while (size > 1)
+    {
+        kernelForScan.setArg(0, vectorBuffer);
+        kernelForScan.setArg(1, step);
+        if (size < localSize)
+        {
+            localSize = size;
+        }
+        opencl.queue.enqueueNDRangeKernel(kernelForScan, cl::NullRange, cl::NDRange(size), cl::NDRange(localSize));
+        size /= localSize;
+        step *= localSize;
+    }
+    kernelForFinalization.setArg(0, vectorBuffer);
+    kernelForFinalization.setArg(1, localSize);
+    opencl.queue.enqueueNDRangeKernel(kernelForFinalization, cl::NullRange, cl::NDRange(n / localSize - 1), cl::NullRange);
+
+    opencl.queue.finish();
     auto t3 = clock_type::now();
+    cl::copy(opencl.queue, vectorBuffer, begin(result), end(result));
     auto t4 = clock_type::now();
-    // TODO Implement OpenCL version! See profile_vector_times_vector for an example.
-    // TODO Uncomment the following line!
-    // verify_vector(expected_result, result);
+
+    assertCloseTo(expected_result[n - 1], result[n - 1]);
+
     print("scan-inclusive",
           {t1 - t0, t4 - t1, t2 - t1, t3 - t2, t4 - t3},
           {bandwidth(n * n + n * n + n * n, t0, t1), bandwidth(n * n + n * n + n * n, t2, t3)});
@@ -164,7 +192,7 @@ void opencl_main(OpenCL &opencl)
     using namespace std::chrono;
     print_column_names();
     profile_reduce(1024 * 1024 * 10, opencl);
-    profile_scan_inclusive(1024 * 1024 * 10);
+    profile_scan_inclusive(1024 * 1024 * 10, opencl);
 }
 
 int main()

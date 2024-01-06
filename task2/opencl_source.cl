@@ -32,7 +32,30 @@ kernel void reduce(global float *a, global float *result) {
   }
 }
 
-kernel void scan_inclusive(global float *a, global float *b,
-                           global float *result) {
-  // TODO: Implement OpenCL version.
+kernel void scan_inclusive(global float *a, int step) {
+    const int globalId = get_global_id(0);
+    const int localId = get_local_id(0);
+    const int localSize = get_local_size(0);
+
+    local float buff[1024];
+    buff[localId] = a[(step - 1) + globalId * step];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    float sum = buff[localId];
+    for (int offset = 1; offset < localSize; offset *= 2) {
+        if (localId >= offset) {
+            sum += buff[localId - offset];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        buff[localId] = sum;
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    a[(step - 1) + globalId * step] = buff[localId];
+}
+
+kernel void scan_inclusive_end(global float* a, int step) {
+    const int globalId = get_global_id(0);
+    for (int j = 0; j < step - 1; j++) {
+        a[(globalId + 1) * step + j] += a[(globalId + 1) * step - 1];
+    }
 }
