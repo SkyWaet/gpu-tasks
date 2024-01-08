@@ -72,56 +72,52 @@ struct OpenCL
 
 void profile_filter(int n, OpenCL &opencl)
 {
+    int localSize = 256;
     auto input = random_std_vector<float>(n);
-    std::vector<float> result(n + 1), expected_result;
+    std::vector<float> result(n), expected_result;
+    std::vector<int> actualSize(1);
+    cl::Kernel map(opencl.program, "map");
+    cl::Kernel scanPartial(opencl.program, "scan_partial");
+    cl::Kernel scanTotal(opencl.program, "scan_total");
+    cl::Kernel scatter(opencl.program, "scatter");
 
     auto t0 = clock_type::now();
     filter(input, expected_result, [](float x)
            { return x > 0; }); // filter positive numbers
+
     auto t1 = clock_type::now();
     cl::Buffer inputBuffer(opencl.queue, std::begin(input), std::end(input), false);
-    opencl.queue.finish();
+    cl::Buffer mapBuffer(opencl.context, CL_MEM_READ_WRITE, sizeof(float) * input.size());
+    cl::Buffer scanBuffer(opencl.context, CL_MEM_READ_WRITE, sizeof(float) * input.size());
+    cl::Buffer sizeBuffer(opencl.context, CL_MEM_READ_WRITE, sizeof(int) * actualSize.size());
+    cl::Buffer resultBuffer(opencl.context, CL_MEM_READ_WRITE, sizeof(float) * result.size());
+    opencl.queue.flush();
 
     auto t2 = clock_type::now();
-    int localSize = 256;
-
-    cl::Kernel map(opencl.program, "map");
-    cl::Buffer mapBuffer(opencl.context, CL_MEM_READ_WRITE, sizeof(float) * input.size());
 
     map.setArg(0, inputBuffer);
     map.setArg(1, mapBuffer);
     opencl.queue.enqueueNDRangeKernel(map, cl::NullRange, cl::NDRange(n), cl::NDRange(localSize));
-    opencl.queue.finish();
-
-    cl::Kernel scanPartial(opencl.program, "scan_partial");
-    cl::Buffer scanBuffer(opencl.context, CL_MEM_READ_WRITE, sizeof(float) * input.size());
 
     scanPartial.setArg(0, mapBuffer);
     scanPartial.setArg(1, scanBuffer);
     opencl.queue.enqueueNDRangeKernel(scanPartial, cl::NullRange, cl::NDRange(n), cl::NDRange(localSize));
-    opencl.queue.finish();
-
-    cl::Kernel scanTotal(opencl.program, "scan_total");
 
     scanTotal.setArg(0, scanBuffer);
     opencl.queue.enqueueNDRangeKernel(scanTotal, cl::NullRange, cl::NDRange(n), cl::NDRange(localSize));
-    opencl.queue.finish();
-
-    cl::Kernel scatter(opencl.program, "scatter");
-    cl::Buffer resultBuffer(opencl.context, CL_MEM_READ_WRITE, sizeof(float) * result.size());
 
     scatter.setArg(0, inputBuffer);
     scatter.setArg(1, scanBuffer);
-    scatter.setArg(2, resultBuffer);
+    scatter.setArg(2, sizeBuffer);
+    scatter.setArg(3, resultBuffer);
 
     opencl.queue.enqueueNDRangeKernel(scatter, cl::NullRange, cl::NDRange(n), cl::NDRange(localSize));
-    opencl.queue.finish();
+    opencl.queue.flush();
     auto t3 = clock_type::now();
-    cl::copy(opencl.queue, resultBuffer, std::begin(result), std::end(result));
+    cl::copy(opencl.queue, sizeBuffer, std::begin(actualSize), std::end(actualSize));
+    cl::copy(opencl.queue, resultBuffer, std::begin(result), std::begin(result) + actualSize.back());
     auto t4 = clock_type::now();
-
-    int actualSize = result[n];
-    result.resize(actualSize);
+    result.resize(actualSize.back());
 
     verify_vector(expected_result, result);
     print("filter", {t1 - t0, t4 - t1, t2 - t1, t3 - t2, t4 - t3});
@@ -131,7 +127,7 @@ void opencl_main(OpenCL &opencl)
 {
     using namespace std::chrono;
     print_column_names();
-    profile_filter(1024*1024, opencl);
+    profile_filter(1024 * 1024, opencl);
 }
 
 int main()

@@ -38,10 +38,10 @@ kernel void scan_total(global int *in) {
   }
 }
 
-kernel void scatter(global float *in, global int *index, global float *out) {
+kernel void scatter(global float *in, global int *index, global int *size,
+                    global float *out) {
   const int globalId = get_global_id(0);
   const int localId = get_local_id(0);
-  const int localSize = get_local_size(0);
 
   local float inBuff[1024];
   inBuff[localId] = in[globalId];
@@ -63,12 +63,8 @@ kernel void scatter(global float *in, global int *index, global float *out) {
   }
 
   barrier(CLK_LOCAL_MEM_FENCE);
-
-  const int groupId = get_group_id(0);
-  const int numGroups = get_num_groups(0);
-
   const int globalSize = get_global_size(0);
   if (globalId == globalSize - 1) {
-    out[globalSize] = index[globalId];
+    size[0] = index[globalId];
   }
 }
