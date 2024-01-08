@@ -1,18 +1,31 @@
-kernel void map(global float *in, global float *out) {
-  const int globalId = get_global_id(0);
-  out[globalId] = in[globalId] > 0 ? 1 : 0;
-}
+kernel void map(global float *in, global int *out) {
+  const int localSize = get_local_size(0);
+  int groupId = get_group_id(0);
+  int localId = get_local_id(0);
+  local float buff[1024];
 
-kernel void scan_partial(global float *in, global int *out) {
+  buff[localId] = in[groupId * localSize + localId];
+  barrier(CLK_LOCAL_MEM_FENCE);
+
+  if (localId == 0) {
+    int cnt = 0;
+    for (int j = 0; j < localSize; j++) {
+      if (buff[j] > 0)
+        cnt++;
+    }
+    out[groupId] = cnt;
+  }
+}
+kernel void scan_partial(global int *out) {
   const int globalId = get_global_id(0);
   const int localId = get_local_id(0);
   const int localSize = get_local_size(0);
 
-  local float buff[1024];
-  buff[localId] = in[globalId];
+  local int buff[1024];
+  buff[localId] = out[globalId];
   barrier(CLK_LOCAL_MEM_FENCE);
 
-  float sum = buff[localId];
+  int sum = buff[localId];
   for (int offset = 1; offset < localSize; offset *= 2) {
     if (localId >= offset) {
       sum += buff[localId - offset];
@@ -26,45 +39,36 @@ kernel void scan_partial(global float *in, global int *out) {
 
 kernel void scan_total(global int *in) {
   const int groupId = get_group_id(0);
-  const int numGroups = get_num_groups(0);
-
+  const int globalSize = get_global_size(0);
   const int localId = get_local_id(0);
   const int localSize = get_local_size(0);
   if (groupId == 0) {
-    for (int j = 1; j < numGroups; j++) {
+    for (int j = 1; j < globalSize / localSize; j++) {
       in[j * localSize + localId] += in[j * localSize - 1];
       barrier(CLK_GLOBAL_MEM_FENCE);
     }
   }
 }
 
-kernel void scatter(global float *in, global int *index, global int *size,
+kernel void scatter(global float *in, global int *offsets,
                     global float *out) {
-  const int globalId = get_global_id(0);
-  const int localId = get_local_id(0);
+  const int localSize = get_local_size(0);
+  int groupId = get_group_id(0);
+  int localId = get_local_id(0);
+  local float buff[1024];
 
-  local float inBuff[1024];
-  inBuff[localId] = in[globalId];
-  local int indexBuff[1024];
-  indexBuff[localId] = index[globalId];
+  buff[localId] = in[groupId * localSize + localId];
   barrier(CLK_LOCAL_MEM_FENCE);
 
   if (localId == 0) {
-    if (globalId == 0 && indexBuff[0] > 0) {
-      out[0] = inBuff[0];
+    int currentIndex = 0;
+    if (groupId > 0)
+      currentIndex = offsets[groupId - 1];
+    for (int j = 0; j < localSize; j++) {
+      if (buff[j] > 0) {
+        out[currentIndex] = buff[j];
+        currentIndex++;
+      }
     }
-    if (globalId > 0 && index[globalId - 1] < indexBuff[0]) {
-      out[indexBuff[0] - 1] = inBuff[0];
-    }
-  }
-
-  if (localId > 0 && indexBuff[localId - 1] < indexBuff[localId]) {
-    out[indexBuff[localId - 1]] = inBuff[localId];
-  }
-
-  barrier(CLK_LOCAL_MEM_FENCE);
-  const int globalSize = get_global_size(0);
-  if (globalId == globalSize - 1) {
-    size[0] = index[globalId];
   }
 }
