@@ -74,7 +74,7 @@ void profile_filter(int n, OpenCL &opencl)
 {
     auto input = random_std_vector<float>(n);
     std::vector<float> result(n + 1), expected_result;
-    std::vector<int> indices(n);
+
     auto t0 = clock_type::now();
     filter(input, expected_result, [](float x)
            { return x > 0; }); // filter positive numbers
@@ -85,8 +85,6 @@ void profile_filter(int n, OpenCL &opencl)
     auto t2 = clock_type::now();
     int localSize = 256;
 
-    std::ofstream out("out.txt");
-
     cl::Kernel map(opencl.program, "map");
     cl::Buffer mapBuffer(opencl.context, CL_MEM_READ_WRITE, sizeof(float) * input.size());
 
@@ -94,17 +92,6 @@ void profile_filter(int n, OpenCL &opencl)
     map.setArg(1, mapBuffer);
     opencl.queue.enqueueNDRangeKernel(map, cl::NullRange, cl::NDRange(n), cl::NDRange(localSize));
     opencl.queue.finish();
-
-    cl::copy(opencl.queue, mapBuffer, std::begin(indices), std::end(indices));
-
-    out << "Map result: " << std::endl;
-    for (int i = 0; i < indices.size(); i++)
-    {
-        out << indices[i] << "(" << input[i] << ")"
-            << " ";
-    }
-
-    out << std::endl;
 
     cl::Kernel scanPartial(opencl.program, "scan_partial");
     cl::Buffer scanBuffer(opencl.context, CL_MEM_READ_WRITE, sizeof(float) * input.size());
@@ -114,32 +101,11 @@ void profile_filter(int n, OpenCL &opencl)
     opencl.queue.enqueueNDRangeKernel(scanPartial, cl::NullRange, cl::NDRange(n), cl::NDRange(localSize));
     opencl.queue.finish();
 
-    cl::copy(opencl.queue, scanBuffer, std::begin(indices), std::end(indices));
-
-    out << "Scan partial result: " << std::endl;
-    for (int i = 0; i < indices.size(); i++)
-    {
-        out << indices[i]
-            << " ";
-    }
-
-    out << std::endl;
-
     cl::Kernel scanTotal(opencl.program, "scan_total");
 
     scanTotal.setArg(0, scanBuffer);
     opencl.queue.enqueueNDRangeKernel(scanTotal, cl::NullRange, cl::NDRange(n), cl::NDRange(localSize));
     opencl.queue.finish();
-
-    cl::copy(opencl.queue, scanBuffer, std::begin(indices), std::end(indices));
-
-    out << "Scan total result: " << std::endl;
-    for (int i = 0; i < indices.size(); i++)
-    {
-        out << indices[i] << " ";
-    }
-
-    out << std::endl;
 
     cl::Kernel scatter(opencl.program, "scatter");
     cl::Buffer resultBuffer(opencl.context, CL_MEM_READ_WRITE, sizeof(float) * result.size());
@@ -156,12 +122,7 @@ void profile_filter(int n, OpenCL &opencl)
 
     int actualSize = result[n];
     result.resize(actualSize);
-    out << "Actual: ";
-    for (auto i : result)
-    {
-        out << i << " ";
-    }
-    out << std::endl;
+
     verify_vector(expected_result, result);
     print("filter", {t1 - t0, t4 - t1, t2 - t1, t3 - t2, t4 - t3});
 }
@@ -170,7 +131,7 @@ void opencl_main(OpenCL &opencl)
 {
     using namespace std::chrono;
     print_column_names();
-    profile_filter(1024, opencl);
+    profile_filter(1024*1024, opencl);
 }
 
 int main()

@@ -49,11 +49,16 @@ kernel void scatter(global float *in, global int *index, global float *out) {
   indexBuff[localId] = index[globalId];
   barrier(CLK_LOCAL_MEM_FENCE);
 
-  if (localId == 0 && indexBuff[localId] > 0) {
-    out[indexBuff[localId] - 1] = inBuff[localId];
+  if (localId == 0) {
+    if (globalId == 0 && indexBuff[0] > 0) {
+      out[0] = inBuff[0];
+    }
+    if (globalId > 0 && index[globalId - 1] < indexBuff[0]) {
+      out[indexBuff[0] - 1] = inBuff[0];
+    }
   }
 
-  if (localId >= 1 && indexBuff[localId - 1] < indexBuff[localId]) {
+  if (localId > 0 && indexBuff[localId - 1] < indexBuff[localId]) {
     out[indexBuff[localId - 1]] = inBuff[localId];
   }
 
@@ -61,14 +66,6 @@ kernel void scatter(global float *in, global int *index, global float *out) {
 
   const int groupId = get_group_id(0);
   const int numGroups = get_num_groups(0);
-
-  if (groupId == 0) {
-    for (int j = 1; j < numGroups; j++) {
-      if (index[j * localSize] > index[j * localSize - 1]) {
-        out[index[j * localSize - 1]] = in[j * localSize];
-      }
-    }
-  }
 
   const int globalSize = get_global_size(0);
   if (globalId == globalSize - 1) {
